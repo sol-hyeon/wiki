@@ -1,0 +1,70 @@
+version: "3.8"
+
+services:
+  minio:
+    image: minio/minio
+    volumes:
+      - ./data/minio_root:/minio_root:z
+      - ./data/certs:/root/.minio/certs:z
+    env_file:
+      - ./.env
+      - ./.env.minio
+    command: minio server /minio_root --console-address ":9001"
+    deploy:
+      placement:
+        constraints:
+          - node.hostname == ${HOSTNAME}
+      labels:
+        - traefik.enable=true
+        # console
+        - traefik.http.routers.202112__wiki-minio.entrypoints=websecure
+        - traefik.http.routers.202112__wiki-minio.rule=Host(`minio.wiki.sol.hyeon.pro`)
+        - traefik.http.routers.202112__wiki-minio.tls.certresolver=leresolver
+        - traefik.http.routers.202112__wiki-minio.service=202112__wiki-minio-service
+        - traefik.http.services.202112__wiki-minio-service.loadbalancer.server.port=9001
+        # api
+        - traefik.http.routers.202112__wiki-minio-api.entrypoints=websecure
+        - traefik.http.routers.202112__wiki-minio-api.rule=Host(`wiki.sol.hyeon.pro`)
+          && PathPrefix("/outline-bucket")
+        - traefik.http.routers.202112__wiki-minio-api.tls.certresolver=leresolver
+        - traefik.http.routers.202112__wiki-minio-api.service=202112__wiki-minio-api-service
+        - traefik.http.services.202112__wiki-minio-api-service.loadbalancer.server.port=9000
+
+  outline:
+    image: outlinewiki/outline:latest
+    command: sh -c "yarn sequelize:migrate --env production-ssl-disabled && yarn start"
+    environment:
+      - DATABASE_URL=postgres://postgres:${POSTGRESQL_PASSWORD}@DB_postgres:5432/sol
+      - REDIS_URL=redis://TOY-sol-wiki_redis:6379
+    env_file:
+      - ./.env
+      - ./.env.outline
+      - ./.env.slack
+    deploy:
+      placement:
+        constraints:
+          - node.hostname == ${HOSTNAME}
+      labels:
+        - traefik.enable=true
+        ## HTTP Routers
+        - traefik.http.routers.202112__wiki.entrypoints=websecure
+        - traefik.http.routers.202112__wiki.rule=Host(`wiki.sol.hyeon.pro`)
+        - traefik.http.routers.202112__wiki.tls.certresolver=leresolver
+        - traefik.http.services.202112__wiki.loadbalancer.server.port=3000
+  redis:
+    image: redis
+    volumes:
+      - redis:/data
+    deploy:
+      placement:
+        constraints:
+          - node.hostname == ${HOSTNAME}
+
+########################### NETWORKS
+networks:
+  default:
+    external:
+      name: DB_net
+
+volumes:
+  redis: null
